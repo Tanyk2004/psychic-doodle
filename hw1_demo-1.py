@@ -81,7 +81,7 @@ def forwarding(mc, dis):
 
 def backwarding(mc, dis):
     # TODO: move the crazyflie backward
-    MotionCommander.backward(mc, dis, .5)
+    MotionCommander.back(mc, dis, .5)
     # Parameters:
     #       mc: motion commander
     #       dis: a floating number representing backward distance
@@ -192,8 +192,8 @@ def infinite_control(scf, lg_stab):
         takeoff_thread = Thread(target=base_commander, args=[scf, lg_stab])
         takeoff_thread.start()
         takeoff_thread.join()
-        cmd = input("Press Enter to Continue...")
-        if cmd == 'e':
+        cmd = input("Press s to take off e to exit")
+        if cmd != 's':
             break
         
 if __name__ == '__main__':
