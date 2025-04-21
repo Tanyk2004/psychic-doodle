@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import glob
+import pickle
 
 # Define chessboard size
 chessboard_size = (9, 6)  # 9x6 internal corners
@@ -17,10 +18,12 @@ imgpoints = []  # 2D points in image plane
 
 # Load calibration images
 images = glob.glob("dronecalib/*.jpg")  # Update with your folder path
+img_shape = None
 
 for fname in images:
     img = cv2.imread(fname)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    img_shape = gray.shape[::-1]  # Store image shape for later use
 
     # Find chessboard corners
     ret, corners = cv2.findChessboardCorners(gray, chessboard_size, None)
@@ -30,8 +33,10 @@ for fname in images:
         imgpoints.append(corners)
 
 # Calibrate the camera
-ret, camera_matrix, dist_coeffs, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, gray.shape[::-1], None, None)
+ret, camera_matrix, dist_coeffs, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, img_shape, None, None)
 
+with open("camera_calibration.pickle", "wb") as f:
+    pickle.dump((camera_matrix, dist_coeffs), f)
 # Print results
 print("Camera Matrix:\n", camera_matrix)
 print("Distortion Coefficients:\n", dist_coeffs)
