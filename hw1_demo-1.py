@@ -13,7 +13,8 @@ from cflib.crazyflie.syncLogger import SyncLogger
 from cflib.positioning.motion_commander import MotionCommander
 
 # URI to the Crazyflie to connect to
-uri = 'radio://0/90/2M/E7E7E7E706'   #TODO: change the uri based on your crazyflie number
+uri = 'radio://0/80/2M/E7E7E7E701'
+#TODO: change the uri based on your crazyflie number
 '''
 1: radio://0/80/2M/E7E7E7E701
 2: radio://0/80/2M/E7E7E7E702
