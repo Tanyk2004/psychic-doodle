@@ -42,6 +42,24 @@ import time
 import socket,os,struct, time
 import numpy as np
 import os
+
+import cflib.crtp
+from cflib.crazyflie import Crazyflie
+from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
+from cflib.utils.power_switch import PowerSwitch
+from threading import Event, Thread
+from cflib.crazyflie.log import LogConfig
+from cflib.crazyflie.syncLogger import SyncLogger
+
+from cflib.positioning.motion_commander import MotionCommander
+
+import logging
+
+
+
+uri = 'radio://0/80/2M/E7E7E7E701'
+
+
 # Args for setting IP/port of AI-deck. Default settings are for when
 # AI-deck is in AP mode.
 parser = argparse.ArgumentParser(description='Connect to AI-deck JPEG streamer example')
@@ -76,41 +94,74 @@ imgcount = 0
 square_size = 1.0
 chessboard_size = (9, 6)
 cube_size = square_size  # Make cube the size of a single square
-cube_points = np.float32([
-    [0, 0, 0], [cube_size, 0, 0], [cube_size, cube_size, 0], [0, cube_size, 0],  # Bottom face
-    [0, 0, -cube_size], [cube_size, 0, -cube_size], [cube_size, cube_size, -cube_size], [0, cube_size, -cube_size]  # Top face
-])
+
 
 camera_matrix = np.array([[190.191, 0, 160.525], [0, 187.639, 147.501], [0, 0, 1]])
-dist_coeff = np.array([[-0.08368914,  0.03974283, -0.0016545, 0.0050885,  -0.05173472]])
+dist_coeffs = np.array([[-0.08368914,  0.03974283, -0.0016545, 0.0050885,  -0.05173472]])
 objp = np.zeros((chessboard_size[0] * chessboard_size[1], 3), np.float32)
 objp[:, :2] = np.mgrid[0:chessboard_size[0], 0:chessboard_size[1]].T.reshape(-1, 2)
 objp *= square_size  # Scale if real square size is known
+
+w, h = 344, 244
+# Precompute undistortion and rectification maps
+new_camera_matrix, roi = cv2.getOptimalNewCameraMatrix(camera_matrix, dist_coeffs, (w, h), 1, (w, h))
+map1, map2 = cv2.initUndistortRectifyMap(camera_matrix, dist_coeffs, None, new_camera_matrix, (w, h), cv2.CV_16SC2)
+
+real_diameter = 1.575  # cm
+fx = camera_matrix[0, 0]
+fy = camera_matrix[1, 1]
+cx = camera_matrix[0, 2]
+cy = camera_matrix[1, 2]
+
 # Create directory to save images
 save_path = "calibration_images"
 os.makedirs(save_path, exist_ok=True)
 
+deck_attached_event = Event()
+
+def param_deck_flow(_, value_str):
+    # Check whether positioning deck is connected or not
+
+    value = int(value_str)
+    print(value)
+    if value:
+        deck_attached_event.set()
+        print('Deck is attached!')
+    else:
+        print('Deck is NOT attached!')
+
+cflib.crtp.init_drivers()
+    
+
+lg_stab = LogConfig(name='Stabilizer', period_in_ms=10)
+lg_stab.add_variable('stabilizer.roll', 'float')
+lg_stab.add_variable('stabilizer.pitch', 'float')
+lg_stab.add_variable('stabilizer.yaw', 'float')
+lg_stab.add_variable('pm.vbat', 'float')
+lg_stab.add_variable('pm.batteryLevel', 'uint8_t')
+
+group = 'stabilizer'
+name = 'estimator'
+
+    
+with SyncCrazyflie(uri, cf=Crazyflie(rw_cache='./cache')) as scf:
+        
+    scf.cf.param.add_update_callback(group="deck", name="bcLighthouse4",
+                                cb=param_deck_flow)
+        # main_thread = Thread(target=infinite_control, args=[scf, lg_stab])
+        # main_thread.start()
+    time.sleep(1)
+        # base_commander(scf, lg_stab)
+
+
 while(1):
     # First get the info
     packetInfoRaw = rx_bytes(4)
-    #print(packetInfoRaw)
     [length, routing, function] = struct.unpack('<HBB', packetInfoRaw)
-    #print("Length is {}".format(length))
-    #print("Route is 0x{:02X}->0x{:02X}".format(routing & 0xF, routing >> 4))
-    #print("Function is 0x{:02X}".format(function))
-
     imgHeader = rx_bytes(length - 2)
-    #print(imgHeader)
-    #print("Length of data is {}".format(len(imgHeader)))
     [magic, width, height, depth, format, size] = struct.unpack('<BHHBBI', imgHeader)
 
     if magic == 0xBC:
-      #print("Magic is good")
-      #print("Resolution is {}x{} with depth of {} byte(s)".format(width, height, depth))
-      #print("Image format is {}".format(format))
-      #print("Image size is {} bytes".format(size))
-
-      # Now we start rx the image, this will be split up in packages of some size
       imgStream = bytearray()
 
       while len(imgStream) < size:
@@ -125,43 +176,42 @@ while(1):
       print(f"{count/(time.time()-start)} frames per second")
 
       if format == 0:
-          bayer_img = np.frombuffer(imgStream, dtype=np.uint8)   
-          bayer_img.shape = (244, 324)
-          color_img = cv2.cvtColor(bayer_img, cv2.COLOR_BayerBG2BGRA)
-          # Detect chessboard corners
-          ret, corners = cv2.findChessboardCorners(bayer_img, chessboard_size, None)
-          if ret:
-            # Refine corners
-            corners2 = cv2.cornerSubPix(bayer_img, corners, (11, 11), (-1, -1), (cv2.TermCriteria_EPS + cv2.TermCriteria_MAX_ITER, 30, 0.001))
-          
-        # Estimate pose (rotation & translation)
-            ret, rvec, tvec = cv2.solvePnP(objp, corners2, camera_matrix, dist_coeff)  # No distortion coefficients
+          gray = np.frombuffer(imgStream, dtype=np.uint8)   
+          gray.shape = (244, 324)
+          undistorted_gray = cv2.remap(gray, map1, map2, interpolation=cv2.INTER_LINEAR)
+          undistorted_frame = cv2.cvtColor(undistorted_gray, cv2.COLOR_BayerBG2BGR)
+          hsv_frame = cv2.cvtColor(undistorted_frame, cv2.COLOR_BGR2HSV)
 
-            if ret:
-            # === Project Cube onto Image ===
-                imgpts, _ = cv2.projectPoints(cube_points, rvec, tvec, camera_matrix, dist_coeff)  # No distortion
+          lower_color = np.array([0, 0, 199])
+          upper_color = np.array([179, 8, 255])
+          mask = cv2.inRange(hsv_frame, lower_color, upper_color)
 
-            # Convert to integer values
-                imgpts = np.int32(imgpts).reshape(-1, 2)
+          segmented_frame = cv2.bitwise_and(undistorted_frame, undistorted_frame, mask=mask)
 
-            # === Draw Cube ===
-            # Bottom square
-                color_img = cv2.drawContours(color_img, [imgpts[:4]], -1, (0, 255, 0), 3)
-            # Vertical edges
-                for i in range(4):
-                    color_img = cv2.line(color_img, tuple(imgpts[i]), tuple(imgpts[i + 4]), (255, 0, 0), 3)
-            # Top square
-                color_img = cv2.drawContours(color_img, [imgpts[4:]], -1, (0, 0, 255), 3)
+          gray = cv2.cvtColor(segmented_frame, cv2.COLOR_BGR2GRAY)
+          _, thresh = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY)
+          contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        # Draw detected corners
-            cv2.drawChessboardCorners(color_img, chessboard_size, corners2, ret)
-          # Show the color_img
-          cv2.imshow("Chessboard Capture", color_img)
+          if contours:
+              largest_contour = max(contours, key=cv2.contourArea)
+              (center, radius) = cv2.minEnclosingCircle(largest_contour)
+              center = (int(center[0]), int(center[1]))
+              radius = int(radius)
 
-          key = cv2.waitKey(1) & 0xFF
-          if key == ord("q"):  # Quit when 'q' is pressed
-            break
-          cv2.waitKey(1)
+        # 3D position estimate
+              px_diameter = 2 * radius
+              z = (fx * real_diameter) / px_diameter
+              x = (center[0] - cx) * z / fx
+              y = (center[1] - cy) * z / fy
+              target = np.asarray([x, y, z])
+              kp, kd = 0,0
+              MotionCommander.start_linear_motion(velocity_x_m=z*kp/x/y, velocity_y_m=x*kp*-1, velocity_z_m=y*-1*kp)
+          else:
+              MotionCommander.start_circle_left(radius_m=.1, velocity=.3)
+
+
+
+
       else:
           with open("img.jpeg", "wb") as f:
               f.write(imgStream)
