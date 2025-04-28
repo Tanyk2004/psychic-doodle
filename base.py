@@ -150,7 +150,7 @@ def get_object_position(frame, camera_matrix, map1, map2,
 
         # 3D position estimate
         px_diameter = 2 * radius
-        if px_diameter == 0:
+        if px_diameter < 20:
             return False, -1, -1, -1
         z = (fx * real_diameter) / px_diameter
         x = (center[0] - cx) * z / fx
@@ -288,15 +288,15 @@ if __name__ == "__main__":
                     map1, map2, h_min, h_max, s_min, s_max, v_min, v_max)
                 # now control the drone based on these x, y, z values
                 y = -y #correct for camera pixel orientation
-                kp, kd = .1,0
+                kp, kd = 0.5,0
                 if ret:
-                    # MotionCommander.start_linear_motion(mc, velocity_x_m=z*kp/x/y, velocity_y_m=x*kp*-1, velocity_z_m=y*-1*kp)
-                    MotionCommander.start_linear_motion(mc, velocity_x_m = 0., velocity_y_m=0., velocity_z_m=y*-1*kp)
+                    MotionCommander.start_linear_motion(mc, velocity_x_m=-z*kp/x/y, velocity_y_m=x*kp*-1, velocity_z_m=y*-1*kp)
+                    # MotionCommander.start_linear_motion(mc, velocity_x_m = 0., velocity_y_m=0., velocity_z_m=y*-1*kp)
                     print(f"camera frame coordinates at x: {x}, y:{y}, z{z}")
                 else:
                     print("hoop not found")
                     # MotionCommander.start_circle_left(mc, .2, .2)
-                    # MotionCommander.stop(mc)
+                    MotionCommander.stop(mc)
 
 
         except KeyboardInterrupt:
