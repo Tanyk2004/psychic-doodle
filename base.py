@@ -1,3 +1,4 @@
+import csv
 from typing import Tuple
 import multiprocessing as mp
 import argparse
@@ -269,6 +270,8 @@ if __name__ == "__main__":
         print("took off")
         # time.sleep(5)
 
+        csv_file = open("object_position.csv", 'w')
+        csv_writer = csv.writer(csv_file)
         try:
             while True:
                 frame = q.get(timeout=5)
@@ -290,9 +293,12 @@ if __name__ == "__main__":
                 y = -y #correct for camera pixel orientation
                 kp, kd = 0.5,0
                 if ret:
-                    MotionCommander.start_linear_motion(mc, velocity_x_m=-z*kp/x/y, velocity_y_m=x*kp*-1, velocity_z_m=y*-1*kp)
+                    # MotionCommander.start_linear_motion(mc, velocity_x_m=z*kp/x/y, velocity_y_m=x*kp*-1, velocity_z_m=y*-1*kp)
                     # MotionCommander.start_linear_motion(mc, velocity_x_m = 0., velocity_y_m=0., velocity_z_m=y*-1*kp)
+
                     print(f"camera frame coordinates at x: {x}, y:{y}, z{z}")
+                    csv_writer.writerow([x, y, z])
+                    mc.forward(distance_m=0.01, velocity=z * kp)
                 else:
                     print("hoop not found")
                     # MotionCommander.start_circle_left(mc, .2, .2)
@@ -313,6 +319,8 @@ if __name__ == "__main__":
             print("Stopping...")
             save(0)
             stop_event.set()
+            mc.land(0.1)
+            csv_file.close()
         finally:
             print("Cleaning up...")
             stop_event.set()
