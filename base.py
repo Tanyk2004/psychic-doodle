@@ -33,7 +33,7 @@ SAVE = True
 REAL_DIAMETER = 0.4318
 
 # Drone Control parameters
-URI = 'radio://0/80/2M/E7E7E7E701'
+URI = 'radio://0/90/2M/E7E7E7E701'
 GROUP = 'stabilizer'
 NAME = 'estimator'
 def connect_to_socket(deck_ip=DECK_IP, deck_port=DECK_PORT):
@@ -272,7 +272,7 @@ if __name__ == "__main__":
 
         MotionCommander.take_off(mc, 1, .2)
         time.sleep(2)
-        MotionCommander.stop(mc)
+        # MotionCommander.stop(mc)
         print("took off")
 
         csv_file = open("object_position.csv", 'w')
@@ -302,6 +302,7 @@ if __name__ == "__main__":
                 DRONE_X = z
                 DRONE_Y = -1 * x
 
+                DEADZONE = 0.05
 
                 if ret:
                     # MotionCommander.start_linear_motion(mc, velocity_x_m=z*kp/x/y, velocity_y_m=x*kp*-1, velocity_z_m=y*-1*kp)
@@ -309,19 +310,24 @@ if __name__ == "__main__":
                     print(f"camera frame coordinates at x: {x}, y:{y}, z{z}")
                     csv_writer.writerow([x, y, z])
                     # MotionCommander.move_distance(mc, z, -1 * x, -1 * y, 0.1)
-                    if DRONE_Z < 0:
+                    if DRONE_Z > 0 + DEADZONE:
                         print("Moving up")
-                        MotionCommander.down(mc, -1 * DRONE_Z, 0.1)
+                        # MotionCommander.down(mc, -1 * DRONE_Z, 0.1)
+                        MotionCommander.start_down(mc, 0.1)
+                        pass
+                    elif DRONE_Z < 0 - DEADZONE:
+                        print("Moving down")
+                        # MotionCommander.up(mc, DRONE_Z, 0.1)
+                        MotionCommander.start_up(mc, 0.1)
                         pass
                     else:
-                        print("Moving down")
-                        MotionCommander.up(mc, DRONE_Z, 0.1)
-                        pass
+                        print("Go through")
+                        MotionCommander.stop(mc)
                 else:
                     print("hoop not found")
 
                     # MotionCommander.start_circle_left(mc, .2, .2)
-                    MotionCommander.stop(mc)
+                    # MotionCommander.stop(mc)
 
 
         except KeyboardInterrupt:
