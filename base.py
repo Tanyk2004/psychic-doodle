@@ -21,6 +21,7 @@ from cflib.positioning.motion_commander import MotionCommander
 
 import logging
 
+import csv
 
 CHESSBOARD_SIZE : Tuple[int] = (9, 6)  # Define chessboard size
 SQUARE_SIZE = 1.0 # Adjust if you know the real size
@@ -151,7 +152,7 @@ def get_object_position(frame, camera_matrix, map1, map2,
 
         # 3D position estimate
         px_diameter = 2 * radius
-        if px_diameter < 20:
+        if px_diameter <= 20:
             return False, -1, -1, -1
         z = (fx * real_diameter) / px_diameter
         x = (center[0] - cx) * z / fx
@@ -265,10 +266,14 @@ if __name__ == "__main__":
         map1, map2 = cv2.initUndistortRectifyMap(camera_matrix, dist_coeffs, None, new_camera_matrix, (w, h), cv2.CV_16SC2)
         get_frame_proc.start()
 
+        csv_file = open('object_positions.csv', 'w') 
+        csv_writer = csv.writer(csv_file)
+    
 
-        Mo.take_off(mc, 1, .2)
+        MotionCommander.take_off(mc, 1, .2)
+        time.sleep(2)
+        MotionCommander.stop(mc)
         print("took off")
-        # time.sleep(5)
 
         csv_file = open("object_position.csv", 'w')
         csv_writer = csv.writer(csv_file)
@@ -290,17 +295,31 @@ if __name__ == "__main__":
                 ret, x, y, z = get_object_position(frame, camera_matrix, 
                     map1, map2, h_min, h_max, s_min, s_max, v_min, v_max)
                 # now control the drone based on these x, y, z values
-                y = -y #correct for camera pixel orientation
-                kp, kd = 0.5,0
-                if ret:
-                    # mc.start_linear_motion( velocity_x_m=z*kp/x/y, velocity_y_m=x*kp*-1, velocity_z_m=y*-1*kp)
-                    # MotionCommander.start_linear_motion(mc, velocity_x_m = 0., velocity_y_m=0., velocity_z_m=y*-1*kp)
+                kp, kd = .1,0
 
+                
+                DRONE_Z =  - 1 * y
+                DRONE_X = z
+                DRONE_Y = -1 * x
+
+
+                if ret:
+                    # MotionCommander.start_linear_motion(mc, velocity_x_m=z*kp/x/y, velocity_y_m=x*kp*-1, velocity_z_m=y*-1*kp)
+                    # MotionCommander.start_linear_motion(mc, velocity_x_m = 0., velocity_y_m=0., velocity_z_m=y*-1*kp)
                     print(f"camera frame coordinates at x: {x}, y:{y}, z{z}")
                     csv_writer.writerow([x, y, z])
-                    mc.forward(distance_m=0.01, velocity=z * kp)
+                    # MotionCommander.move_distance(mc, z, -1 * x, -1 * y, 0.1)
+                    if DRONE_Z < 0:
+                        print("Moving up")
+                        MotionCommander.down(mc, -1 * DRONE_Z, 0.1)
+                        pass
+                    else:
+                        print("Moving down")
+                        MotionCommander.up(mc, DRONE_Z, 0.1)
+                        pass
                 else:
                     print("hoop not found")
+
                     # MotionCommander.start_circle_left(mc, .2, .2)
                     MotionCommander.stop(mc)
 
@@ -319,8 +338,7 @@ if __name__ == "__main__":
             print("Stopping...")
             save(0)
             stop_event.set()
-            mc.land(0.1)
-            csv_file.close()
+            mc.land(velocity=0.1)
         finally:
             print("Cleaning up...")
             stop_event.set()
