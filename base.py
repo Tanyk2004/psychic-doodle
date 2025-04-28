@@ -265,7 +265,7 @@ if __name__ == "__main__":
         get_frame_proc.start()
 
 
-        MotionCommander.take_off(mc, 1, .2)
+        Mo.take_off(mc, 1, .2)
         print("took off")
         # time.sleep(5)
 
@@ -290,7 +290,7 @@ if __name__ == "__main__":
                 y = -y #correct for camera pixel orientation
                 kp, kd = 0.5,0
                 if ret:
-                    MotionCommander.start_linear_motion(mc, velocity_x_m=-z*kp/x/y, velocity_y_m=x*kp*-1, velocity_z_m=y*-1*kp)
+                    mc.start_linear_motion( velocity_x_m=-z*kp/x/y, velocity_y_m=x*kp*-1, velocity_z_m=y*-1*kp)
                     # MotionCommander.start_linear_motion(mc, velocity_x_m = 0., velocity_y_m=0., velocity_z_m=y*-1*kp)
                     print(f"camera frame coordinates at x: {x}, y:{y}, z{z}")
                 else:
