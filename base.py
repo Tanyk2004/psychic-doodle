@@ -20,7 +20,8 @@ from cflib.crazyflie.syncLogger import SyncLogger
 from cflib.positioning.motion_commander import MotionCommander
 
 import logging
-
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 import csv
 
 CHESSBOARD_SIZE : Tuple[int] = (9, 6)  # Define chessboard size
@@ -33,7 +34,7 @@ SAVE = True
 REAL_DIAMETER = 0.4318
 
 # Drone Control parameters
-URI = 'radio://0/90/2M/E7E7E7E701'
+URI = 'radio://0/90/2M/E7E7E7E704'
 GROUP = 'stabilizer'
 NAME = 'estimator'
 def connect_to_socket(deck_ip=DECK_IP, deck_port=DECK_PORT):
@@ -49,12 +50,19 @@ def rx_bytes(socket, size):
         data.extend(socket.recv(size-len(data)))
     return data
 
+def get_frame_camera(out_queue, stop_event, start):
+    
+    cap = cv2.VideoCapture(0)
+    while not stop_event.is_set():
+        ret, frame = cap.read()
+        out_queue.put(frame)
+   
 def get_frame(out_queue, stop_event, start):
     client_socket = connect_to_socket()
     if socket is None:
        print("Failed to connect to socket")
        exit(1)
-
+# 
     while not stop_event.is_set():
         # First get the info
         # packetInfoRaw = rx_bytes(4)
@@ -62,22 +70,22 @@ def get_frame(out_queue, stop_event, start):
         while len(packetInfoRaw) < 4:
             packetInfoRaw.extend(client_socket.recv(4-len(packetInfoRaw)))
         
-        #print(packetInfoRaw)
+        # print(packetInfoRaw)
         [length, routing, function] = struct.unpack('<HBB', packetInfoRaw)
-        #print("Length is {}".format(length))
-        #print("Route is 0x{:02X}->0x{:02X}".format(routing & 0xF, routing >> 4))
-        #print("Function is 0x{:02X}".format(function))
+        # print("Length is {}".format(length))
+        # print("Route is 0x{:02X}->0x{:02X}".format(routing & 0xF, routing >> 4))
+        # print("Function is 0x{:02X}".format(function))
 
         imgHeader = rx_bytes(client_socket, length - 2)
-        #print(imgHeader)
-        #print("Length of data is {}".format(len(imgHeader)))
+        # print(imgHeader)
+        # print("Length of data is {}".format(len(imgHeader)))
         [magic, width, height, depth, format, size] = struct.unpack('<BHHBBI', imgHeader)
 
         if magic == 0xBC:
-            #print("Magic is good")
-            #print("Resolution is {}x{} with depth of {} byte(s)".format(width, height, depth))
-            #print("Image format is {}".format(format))
-            #print("Image size is {} bytes".format(size))
+            print("Magic is good")
+            print("Resolution is {}x{} with depth of {} byte(s)".format(width, height, depth))
+            print("Image format is {}".format(format))
+            print("Image size is {} bytes".format(size))
 
             # Now we start rx the image, this will be split up in packages of some size
             imgStream = bytearray()
@@ -85,7 +93,7 @@ def get_frame(out_queue, stop_event, start):
             while len(imgStream) < size:
                 packetInfoRaw = rx_bytes(client_socket, 4)
                 [length, dst, src] = struct.unpack('<HBB', packetInfoRaw)
-                #print("Chunk size is {} ({:02X}->{:02X})".format(length, src, dst))
+                print("Chunk size is {} ({:02X}->{:02X})".format(length, src, dst))
                 chunk = rx_bytes(client_socket, length - 2)
                 imgStream.extend(chunk)
 
@@ -124,7 +132,7 @@ def get_object_position(frame, camera_matrix, map1, map2,
     # Convert to HSV
     hsv_frame = cv2.cvtColor(undistorted_frame, cv2.COLOR_BGRA2BGR)
     hsv_frame = cv2.cvtColor(hsv_frame, cv2.COLOR_BGR2HSV)
-    cv2.imshow('HSV', hsv_frame)
+    # cv2.imshow('HSV', hsv_frame)
     # HSV range for white (adjust if needed)
     # lower_color = np.array([0, 0, 199])
     # upper_color = np.array([179, 8, 255])
@@ -237,115 +245,139 @@ if __name__ == "__main__":
     lg_stab.add_variable('pm.batteryLevel', 'uint8_t')
 
 
-    with SyncCrazyflie(URI, cf=Crazyflie(rw_cache='./cache')) as scf:
+    # with SyncCrazyflie(URI, cf=Crazyflie(rw_cache='./cache')) as scf:
         
 
-        spawnTrackbars()
+    spawnTrackbars()
 
 
 
-        scf.cf.param.add_update_callback(group="deck", name="bcLighthouse4",
-                                    cb=param_deck_flow)
+        # scf.cf.param.add_update_callback(group="deck", name="bcLighthouse4",
+        #                             cb=param_deck_flow)
             # main_thread = Thread(target=infinite_control, args=[scf, lg_stab])
             # main_thread.start()
-        time.sleep(1)
-            # base_commander(scf, lg_stab)
-        print("setting mc")
-        mc = MotionCommander(scf)
+    time.sleep(1)
+        # base_commander(scf, lg_stab)
+    print("setting mc")
+    # mc = MotionCommander(scf)
 
-        start_time = time.time()
-        # if save path does not exist, create it
-        os.makedirs(SAVE_PATH, exist_ok=True)
+    start_time = time.time()
+    # if save path does not exist, create it
+    os.makedirs(SAVE_PATH, exist_ok=True)
 
-        camera_matrix, dist_coeffs = load_camera_matrix("camera_calibration.pickle")
-        q = mp.Queue(maxsize=10)
-        stop_event = mp.Event()
-        get_frame_proc = mp.Process(target=get_frame, args=(q, stop_event, start_time))
-        w, h = 344, 244
-        new_camera_matrix, _ = cv2.getOptimalNewCameraMatrix(camera_matrix, dist_coeffs, (w, h), 1, (w, h))
-        map1, map2 = cv2.initUndistortRectifyMap(camera_matrix, dist_coeffs, None, new_camera_matrix, (w, h), cv2.CV_16SC2)
-        get_frame_proc.start()
+    camera_matrix, dist_coeffs = load_camera_matrix("camera_calibration.pickle")
+    q = mp.Queue(maxsize=10)
+    stop_event = mp.Event()
+    get_frame_proc = mp.Process(target=get_frame, args=(q, stop_event, start_time))
+    w, h = 344, 244
+    # w, h = 640, 480
+    new_camera_matrix, _ = cv2.getOptimalNewCameraMatrix(camera_matrix, dist_coeffs, (w, h), 1, (w, h))
+    map1, map2 = cv2.initUndistortRectifyMap(camera_matrix, dist_coeffs, None, new_camera_matrix, (w, h), cv2.CV_16SC2)
+    get_frame_proc.start()
 
-        csv_file = open('object_positions.csv', 'w') 
-        csv_writer = csv.writer(csv_file)
-    
 
-        MotionCommander.take_off(mc, 1, .2)
-        time.sleep(2)
-        # MotionCommander.stop(mc)
-        print("took off")
 
-        csv_file = open("object_position.csv", 'w')
-        csv_writer = csv.writer(csv_file)
-        try:
-            while True:
-                frame = q.get(timeout=5)
-                # print("Processing frame...", frame)
+    # MotionCommander.take_off(mc, 1, .2)
+    # time.sleep(2)
+    # MotionCommander.stop(mc)
+    print("took off")
 
-                # process the frame here
-                cv2.imshow("Frame",frame) 
-                cv2.waitKey(1)
-                h_min = cv2.getTrackbarPos('H_min', 'mask') 
-                h_max = cv2.getTrackbarPos('H_max', 'mask')
-                s_min = cv2.getTrackbarPos('S_min', 'mask')
-                s_max = cv2.getTrackbarPos('S_max', 'mask')
-                v_min = cv2.getTrackbarPos('V_min', 'mask')
-                v_max = cv2.getTrackbarPos('V_max', 'mask')       
-                #print(f"h_min {h_min} | h_max {h_max} ")
-                ret, x, y, z = get_object_position(frame, camera_matrix, 
-                    map1, map2, h_min, h_max, s_min, s_max, v_min, v_max)
-                # now control the drone based on these x, y, z values
-                kp, kd = .1,0
+    csv_file = open("object_position.csv", 'w')
+    csv_writer = csv.writer(csv_file)
+    csv_writer.writerow(["velocity_x_m", "velocity_y_m", "velocity_z_m"])
 
-                
-                DRONE_Z =  - 1 * y
-                DRONE_X = z
-                DRONE_Y = -1 * x
+    # create matplotlib figure and axis
+    fig = plt.figure()    
+    ax = fig.add_subplot(111, projection='3d')
+    plt.ion()
+    # Set axis limits
+    ax.set_xlim(-10, 10)
+    ax.set_ylim(-10, 10)
+    ax.set_zlim(0, 20)
+    ax.set_xlabel('Velocity X')
+    ax.set_ylabel('Velocity Y')
+    ax.set_zlabel('Velocity Z')
 
-                DEADZONE = 0.05
+    quiver = ax.quiver(0, 0, 0, 0, 0, 0, color='red')
+    try:
+        while True:
+            frame = q.get(timeout=5)
+            # print("Processing frame...", frame)
 
-                if ret:
-                    # MotionCommander.start_linear_motion(mc, velocity_x_m=z*kp/x/y, velocity_y_m=x*kp*-1, velocity_z_m=y*-1*kp)
-                    # MotionCommander.start_linear_motion(mc, velocity_x_m = 0., velocity_y_m=0., velocity_z_m=y*-1*kp)
-                    print(f"camera frame coordinates at x: {x}, y:{y}, z{z}")
-                    csv_writer.writerow([x, y, z])
-                    # MotionCommander.move_distance(mc, z, -1 * x, -1 * y, 0.1)
-                    if DRONE_Z > 0 + DEADZONE:
-                        print("Moving up")
-                        # MotionCommander.down(mc, -1 * DRONE_Z, 0.1)
-                        MotionCommander.start_down(mc, 0.1)
-                        pass
-                    elif DRONE_Z < 0 - DEADZONE:
-                        print("Moving down")
-                        # MotionCommander.up(mc, DRONE_Z, 0.1)
-                        MotionCommander.start_up(mc, 0.1)
-                        pass
-                    else:
-                        print("Go through")
-                        MotionCommander.stop(mc)
+            # process the frame here
+            cv2.imshow("Frame",frame) 
+            print(frame.shape)
+            cv2.waitKey(1)
+            h_min = cv2.getTrackbarPos('H_min', 'mask') 
+            h_max = cv2.getTrackbarPos('H_max', 'mask')
+            s_min = cv2.getTrackbarPos('S_min', 'mask')
+            s_max = cv2.getTrackbarPos('S_max', 'mask')
+            v_min = cv2.getTrackbarPos('V_min', 'mask')
+            v_max = cv2.getTrackbarPos('V_max', 'mask')       
+            #print(f"h_min {h_min} | h_max {h_max} ")
+            ret, x, y, z = get_object_position(frame, camera_matrix, 
+                map1, map2, h_min, h_max, s_min, s_max, v_min, v_max)
+            # now control the drone based on these x, y, z values
+            kp, kd = 1,0
+
+            
+            DRONE_Z =  - 1 * y
+            DRONE_X = z
+            DRONE_Y = -1 * x
+
+            DEADZONE = 0.05
+
+            if ret:
+                # MotionCommander.start_linear_motion(mc, velocity_x_m=z*kp/x/y, velocity_y_m=x*kp*-1, velocity_z_m=y*-1*kp)
+                # MotionCommander.start_linear_motion(mc, velocity_x_m = 0., velocity_y_m=0., velocity_z_m=y*-1*kp)
+                print(f"camera frame coordinates at x: {x}, y:{y}, z{z}")
+                velocity_x_m = z * kp / abs(x) / abs(y) /10
+                velocity_y_m = x * kp * -100
+                velocity_z_m = y * -100 * kp
+                # csv_writer.writerow([x, y, z])
+                csv_writer.writerow([velocity_x_m, velocity_y_m, velocity_z_m])
+                quiver.remove()
+                quiver = ax.quiver(0, 0, 0, velocity_x_m, velocity_y_m, velocity_z_m, color='red', length=0.5)
+                plt.draw()
+                plt.pause(0.005)
+                # MotionCommander.move_distance(mc, z, -1 * x, -1 * y, 0.1)
+                if DRONE_Z > 0 + DEADZONE:
+                    print("Moving up")
+                    # MotionCommander.down(mc, -1 * DRONE_Z, 0.1)
+                    # MotionCommander.start_down(mc, 0.1)
+                    pass
+                elif DRONE_Z < 0 - DEADZONE:
+                    print("Moving down")
+                    # MotionCommander.up(mc, DRONE_Z, 0.1)
+                    # MotionCommander.start_up(mc, 0.1)
+                    pass
                 else:
-                    print("hoop not found")
-
-                    # MotionCommander.start_circle_left(mc, .2, .2)
+                    print("Go through")
                     # MotionCommander.stop(mc)
+            else:
+                print("hoop not found")
+
+                # MotionCommander.start_circle_left(mc, .2, .2)
+                # MotionCommander.stop(mc)
 
 
-        except KeyboardInterrupt:
-            def save(x):
-                h_min = cv2.getTrackbarPos('H_min', 'mask')
-                h_max = cv2.getTrackbarPos('H_max', 'mask')
-                s_min = cv2.getTrackbarPos('S_min', 'mask')
-                s_max = cv2.getTrackbarPos('S_max', 'mask')
-                v_min = cv2.getTrackbarPos('V_min', 'mask')
-                v_max = cv2.getTrackbarPos('V_max', 'mask')
+    except KeyboardInterrupt:
+        def save(x):
+            h_min = cv2.getTrackbarPos('H_min', 'mask')
+            h_max = cv2.getTrackbarPos('H_max', 'mask')
+            s_min = cv2.getTrackbarPos('S_min', 'mask')
+            s_max = cv2.getTrackbarPos('S_max', 'mask')
+            v_min = cv2.getTrackbarPos('V_min', 'mask')
+            v_max = cv2.getTrackbarPos('V_max', 'mask')
 
-                with open('color_ranges.txt', 'w') as f:
-                    f.write(f"{URI}, {h_min},{h_max},{s_min},{s_max},{v_min},{v_max}") 
-            print("Stopping...")
-            save(0)
-            stop_event.set()
-            mc.land(velocity=0.1)
-        finally:
-            print("Cleaning up...")
-            stop_event.set()
-            get_frame_proc.join(5)
+            with open('color_ranges.txt', 'w') as f:
+                f.write(f"{URI}, {h_min},{h_max},{s_min},{s_max},{v_min},{v_max}") 
+        print("Stopping...")
+        save(0)
+        cv2.destroyAllWindows()
+        stop_event.set()
+        # mc.land(velocity=0.1)
+    finally:
+        print("Cleaning up...")
+        stop_event.set()
+        get_frame_proc.join(5)
